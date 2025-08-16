@@ -1,11 +1,10 @@
-// script.js (Updated for Phase 3)
+// script.js (Updated with exact field names, including correct capitalization)
 
-// --- Define your ArcGIS Feature Service URLs here ---
-const VACANT_LAND_SERVICE_URL = 'YOUR_VACANT_LAND_FEATURE_SERVICE_URL/FeatureServer'; // Ensure you've replaced this
-const PARCEL_LOOKUP_SERVICE_URL = 'YOUR_PARCEL_LOOKUP_FEATURE_SERVICE_URL/FeatureServer'; // Ensure you've replaced this
-// New: Add Zoning Service URL - You'll need to find this URL similar to how you found the others.
-// For example: const ZONING_SERVICE_URL = 'https://services.arcgis.com/your-org-id/arcgis/rest/services/Zoning/FeatureServer';
-const ZONING_SERVICE_URL = 'https://gis.charlottenc.gov/arcgis/rest/services/PLN/Zoning/MapServer/0'; // Find this on the Charlotte Open Data Portal
+// --- Define your ArcGIS MapService URLs here ---
+// IMPORTANT: Ensure these are the BASE MapServer URLs (e.g., ending in /MapServer, not /MapServer/0)
+const VACANT_LAND_SERVICE_URL = 'https://gis.charlottenc.gov/arcgis/rest/services/PLN/VacantLand/MapServer'; // e.g., https://services.arcgis.com/.../Vacant_Land/MapServer
+const PARCEL_LOOKUP_SERVICE_URL = 'https://gis.charlottenc.gov/arcgis/rest/services/CLT_Ex/CLTEx_MoreInfo/MapServer'; // e.g., https://services.arcgis.com/.../Parcel_Look_Up/MapServer
+const ZONING_SERVICE_URL = 'https://gis.charlottenc.gov/arcgis/rest/services/PLN/Zoning/MapServer'; // e.g., https://gis.charlottenc.gov/arcgis/rest/services/PLN/Zoning/MapServer
 
 // Global variables for map and data layers
 let map;
@@ -14,19 +13,22 @@ let allParcelFeatures = []; // Stores all fetched parcel features for client-sid
 let vacantParcelIds = new Set(); // To store IDs of vacant parcels for quick lookup
 let zoningData = null; // To store zoning data once fetched
 
-// Utility function to fetch ArcGIS data as GeoJSON
+// Utility function to fetch ArcGIS data as GeoJSON from a MapServer Layer
 async function fetchArcGISDataAsGeoJSON(serviceUrl, layerId = '0', whereClause = '1=1', outFields = '*') {
-    // Limit to 1000 features per request to avoid too large responses for initial load,
-    // or implement pagination for very large datasets if needed.
-    const queryUrl = `${serviceUrl}/${layerId}/query?where=${encodeURIComponent(whereClause)}&outFields=${outFields}&f=geojson&resultRecordCount=1000`; // Added resultRecordCount
+    // Construct the query URL for a specific layer within a MapServer
+    // 'returnGeometry=true' is often crucial for MapServer queries to return spatial data
+    const queryUrl = `${serviceUrl}/${layerId}/query?where=${encodeURIComponent(whereClause)}&outFields=${outFields}&f=geojson&returnGeometry=true&resultRecordCount=1000`;
 
-    console.log(`Workspaceing data from: ${queryUrl}`);
-    document.getElementById('mapLoadingStatus').textContent = `Workspaceing ${serviceUrl.includes("Vacant_Land") ? "vacant land" : serviceUrl.includes("Zoning") ? "zoning" : "parcel"} data...`;
+    console.log(`Fetching data from: ${queryUrl}`);
+    document.getElementById('mapLoadingStatus').textContent = `Fetching ${serviceUrl.includes("Vacant_Land") ? "vacant land" : serviceUrl.includes("Zoning") ? "zoning" : "parcel"} data...`;
 
     try {
         const response = await fetch(queryUrl);
         if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            // Log full response text for debugging server errors
+            const errorText = await response.text();
+            console.error(`Server response for ${queryUrl}:`, errorText);
+            throw new Error(`HTTP error! status: ${response.status} - ${errorText.substring(0, 100)}...`);
         }
         const data = await response.json();
         console.log('Fetched ArcGIS Data:', data);
@@ -52,26 +54,33 @@ function initializeMap() {
 
 // Function to load all necessary data and display initial parcels
 async function loadAllDataAndParcels() {
-    // 1. Fetch Parcel Data
-    const parcelGeoJSON = await fetchArcGISDataAsGeoJSON(PARCEL_LOOKUP_SERVICE_URL, '0', '1=1', 'PARCELID,ADDRNO,PREDIR,STNAME,STTYPE,SUFDIR,UNIT,CITY,STATE,ZIPCODE,PROP_ADDR,OWNERNAME,DEED_ACRES');
+    // 1. Fetch Parcel Data - UPDATED outFields with correct capitalization
+    // IMPORTANT: Verify these field names EXACTLY match what's in your MapServer's "Fields" section.
+    // Go to your PARCEL_LOOKUP_SERVICE_URL in a browser, click Layer 0, and find the "Fields" section.
+    // Example: 'PID,Owner_FirstName,Owner_LastName,Total_Acreage,Mailing_Address,Zip_Code'
+    const parcelFields = 'PID,Owner_FirstName,Owner_LastName,Total_Acreage,Mailing_Address,Zip_Code'; // <<< VERIFY THESE FIELD NAMES FROM ARCGIS SERVICE PAGE
+    const parcelGeoJSON = await fetchArcGISDataAsGeoJSON(PARCEL_LOOKUP_SERVICE_URL, '0', '1=1', parcelFields);
     if (!parcelGeoJSON || !parcelGeoJSON.features) {
         document.getElementById('mapLoadingStatus').textContent = 'Failed to load parcel data.';
         return;
     }
     allParcelFeatures = parcelGeoJSON.features; // Store all features for filtering
 
-    // 2. Fetch Vacant Land Data
-    const vacantLandGeoJSON = await fetchArcGISDataAsGeoJSON(VACANT_LAND_SERVICE_URL, '0', '1=1', 'PARCELID');
+    // 2. Fetch Vacant Land Data - UPDATED outFields
+    // IMPORTANT: Verify 'PID' (or whatever the parcel ID field is) EXACTLY matches in your Vacant Land MapServer.
+    const vacantLandFields = 'PID'; // <<< VERIFY THIS FIELD NAME
+    const vacantLandGeoJSON = await fetchArcGISDataAsGeoJSON(VACANT_LAND_SERVICE_URL, '0', '1=1', vacantLandFields);
     if (vacantLandGeoJSON && vacantLandGeoJSON.features) {
-        vacantParcelIds = new Set(vacantLandGeoJSON.features.map(f => f.properties && f.properties.PARCELID).filter(Boolean));
+        vacantParcelIds = new Set(vacantLandGeoJSON.features.map(f => f.properties && f.properties.PID).filter(Boolean)); // Use PID
         console.log(`Identified ${vacantParcelIds.size} vacant parcels.`);
     } else {
         console.warn('Could not load vacant land data. Vacant parcel highlighting might not work.');
     }
 
     // 3. Fetch Zoning Data (for conceptual subdivision potential)
-    // You'll need to find the specific URL for Charlotte's Zoning dataset
-    zoningData = await fetchArcGISDataAsGeoJSON(ZONING_SERVICE_URL, '0', '1=1', 'ZONING,ZONE_DESC'); // Adjust 'ZONING,ZONE_DESC' to actual field names
+    // IMPORTANT: Verify 'ZONING' and 'ZONE_DESC' (or whatever the zoning fields are) EXACTLY match in your Zoning MapServer.
+    const zoningFields = 'ZoneDes'; // <<< VERIFY THESE FIELD NAMES
+    zoningData = await fetchArcGISDataAsGeoJSON(ZONING_SERVICE_URL, '0', '1=1', zoningFields);
     if (!zoningData) {
         console.warn('Could not load zoning data. Subdivision potential analysis will be limited.');
     } else {
@@ -97,8 +106,8 @@ function updateMapDisplay() {
         const props = feature.properties;
         if (!props) return false; // Skip if no properties
 
-        const parcelId = props.PARCELID;
-        const acres = props.DEED_ACRES ? parseFloat(props.DEED_ACRES) : 0;
+        const parcelId = props.PID; // Use PID
+        const acres = props.Total_Acreage ? parseFloat(props.Total_Acreage) : 0; // Use Total_Acreage
         const isVacant = vacantParcelIds.has(parcelId);
 
         // Filter by Parcel ID
@@ -121,7 +130,7 @@ function updateMapDisplay() {
 
     parcelLayer = L.geoJSON(filteredFeatures, {
         style: function(feature) {
-            const parcelId = feature.properties ? feature.properties.PARCELID : null;
+            const parcelId = feature.properties ? feature.properties.PID : null; // Use PID
             const isVacant = parcelId && vacantParcelIds.has(parcelId);
 
             if (isVacant) {
@@ -147,25 +156,24 @@ function updateMapDisplay() {
         onEachFeature: function(feature, layer) {
             if (feature.properties) {
                 const props = feature.properties;
-                const parcelId = props.PARCELID || 'N/A';
-                const address = `${props.ADDRNO || ''} ${props.PREDIR || ''} ${props.STNAME || ''} ${props.STTYPE || ''} ${props.SUFDIR || ''}, ${props.CITY || ''}, ${props.STATE || ''} ${props.ZIPCODE || ''}`.trim();
-                const owner = props.OWNERNAME || 'N/A';
-                const acres = props.DEED_ACRES ? parseFloat(props.DEED_ACRES).toFixed(2) : 'N/A';
+                const parcelId = props.PID || 'N/A'; // Use PID
+                // Construct address using Mailing_Address and Zip_Code
+                const address = `${props.Mailing_Address || 'N/A'}, ${props.Zip_Code || ''}`.trim(); // Use Mailing_Address, Zip_Code
+                const owner = `${props.Owner_FirstName || ''} ${props.Owner_LastName || ''}`.trim() || 'N/A'; // Combine first and last name
+                const acres = props.Total_Acreage ? parseFloat(props.Total_Acreage).toFixed(2) : 'N/A'; // Use Total_Acreage
                 const isVacant = vacantParcelIds.has(parcelId) ? 'Yes' : 'No';
 
                 // Get zoning info if available
                 let zoningCode = 'N/A';
                 let zoningDescription = 'N/A';
                 if (zoningData && zoningData.features) {
-                    // This is a simplified spatial lookup. For accuracy, you'd use a more robust spatial library
-                    // or request specific zoning for the parcel from the API.
-                    // For now, we'll just show 'Available' if any zoning data exists, or you could try a point-in-polygon check.
-                    // A proper spatial join is out of scope for client-side JS without a dedicated library.
-                    // The best way is to query the zoning service with the parcel's geometry or centroid.
-                    // For demonstration, let's assume we can get a zoning code from a related service or attribute on the parcel itself later.
-                    // For now, we'll note if zoning data was loaded.
-                    zoningCode = 'Zoning data loaded (details on click)';
-                    zoningDescription = 'Check zoning for subdivision rules.';
+                    // This is a simplified lookup for display.
+                    // For accurate per-parcel zoning, you would typically need to:
+                    // 1. Perform a spatial query to the Zoning MapServer layer using the parcel's geometry.
+                    // 2. If the MapServer provides a 'ZONING' or 'ZONE_DESC' field directly on the parcel, use that.
+                    // For now, we'll indicate if zoning data was loaded in general.
+                    zoningCode = 'Data Loaded';
+                    zoningDescription = 'Check specific parcel details/zoning site for rules.';
                 }
 
 

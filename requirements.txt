@@ -1,0 +1,24 @@
+# Core dependencies for Charlotte Land Map Backend
+requests==2.31.0
+psycopg2-binary==2.9.7
+geopandas==0.14.1
+flask==3.0.0
+flask-cors==4.0.0
+python-dotenv==1.0.0
+
+# Additional useful packages for land development analysis
+shapely==2.0.2
+fiona==1.9.5
+pyproj==3.6.1
+pandas==2.1.4
+numpy==1.24.4
+
+# API integration packages
+whitepages-python==0.1.0
+truepeoplesearch==0.1.0
+
+# Development and testing
+pytest==7.4.3
+black==23.11.0
+flake8==6.1.0
+
